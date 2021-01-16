@@ -3,6 +3,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <esp_log.h>
 
 #include <HAP.h>
 
@@ -321,5 +322,40 @@ esp_err_t esp_hk_start()
 {
     xTaskCreate(esp_hk_task, "esp_hk_task", 6 * 1024, NULL, 6, NULL);
 
+    return ESP_OK;
+}
+
+typedef struct
+{
+    const HAPCharacteristic *characteristic;
+    const HAPService *service;
+    const HAPAccessory *accessory;
+} esp_hk_raise_event_ctx_t;
+
+static void esp_hk_raise_event_internal(void *ctx_void, size_t ctx_size)
+{
+    ESP_LOGD("HK", "HAPAccessoryServerRaiseEvent!");
+    esp_hk_raise_event_ctx_t *ctx = (esp_hk_raise_event_ctx_t*)ctx_void;
+    HAPAccessoryServerRaiseEvent(&accessoryServer, ctx->characteristic, ctx->service, ctx->accessory);
+}
+
+esp_err_t esp_hk_raise_event(
+    const HAPAccessory *accessory,
+    const HAPService *service,
+    const HAPCharacteristic *characteristic)
+{
+    esp_hk_raise_event_ctx_t *ctx = malloc(sizeof(esp_hk_raise_event_ctx_t));
+    ctx->accessory = accessory;
+    ctx->service = service;
+    ctx->characteristic = characteristic;
+
+    HAPError err = HAPPlatformRunLoopScheduleCallback(esp_hk_raise_event_internal, ctx, sizeof(esp_hk_raise_event_ctx_t));
+    if (err)
+    {
+        HAPAssert(err == kHAPError_Unknown);
+        HAPFatalError();
+    }
+
+    free(ctx);
     return ESP_OK;
 }
