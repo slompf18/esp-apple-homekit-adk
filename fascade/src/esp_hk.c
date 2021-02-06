@@ -3,6 +3,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/event_groups.h>
 #include <esp_log.h>
 
 #include <HAP.h>
@@ -20,11 +21,14 @@
 #include "../../port/include/HAPPlatformServiceDiscovery+Init.h"
 #include "../../port/include/HAPPlatformTCPStreamManager+Init.h"
 #endif
+#define ESP_HK "esp_hk"
+#define ESP_HK_SERVER_IDLE BIT0
 
 static bool requestedFactoryReset = false;
 static bool clearPairings = false;
 static HAPAccessoryServerRef accessoryServer;
 static HAPAccessory *acc;
+static EventGroupHandle_t esp_hk_event_group;
 /**
  * Global platform objects.
  * Only tracks objects that will be released in DeinitializePlatform.
@@ -51,6 +55,7 @@ static struct
 
 static void AppAccessoryServerStart(void)
 {
+    ESP_LOGD(ESP_HK, "Starting server.");
     HAPAccessoryServerStart(&accessoryServer, acc);
 }
 
@@ -59,8 +64,10 @@ static void AppAccessoryServerStart(void)
  */
 static void HandleUpdatedState(HAPAccessoryServerRef *_Nonnull server, void *_Nullable context)
 {
-    if (HAPAccessoryServerGetState(server) == kHAPAccessoryServerState_Idle && requestedFactoryReset)
+    HAPAccessoryServerState state = HAPAccessoryServerGetState(server);
+    if (state == kHAPAccessoryServerState_Idle && requestedFactoryReset)
     {
+        ESP_LOGD(ESP_HK, "Server is now idle, doing factory reset.");
         HAPPrecondition(server);
 
         HAPError err;
@@ -98,8 +105,9 @@ static void HandleUpdatedState(HAPAccessoryServerRef *_Nonnull server, void *_Nu
         AppAccessoryServerStart();
         return;
     }
-    else if (HAPAccessoryServerGetState(server) == kHAPAccessoryServerState_Idle && clearPairings)
+    else if (state == kHAPAccessoryServerState_Idle && clearPairings)
     {
+        ESP_LOGD(ESP_HK, "Server is now idle, clearing pairings.");
         HAPError err;
         err = HAPRemoveAllPairings(&platform.keyValueStore);
         if (err)
@@ -109,9 +117,22 @@ static void HandleUpdatedState(HAPAccessoryServerRef *_Nonnull server, void *_Nu
         }
         AppAccessoryServerStart();
     }
+    else if (state == kHAPAccessoryServerState_Idle)
+    {
+        ESP_LOGD(ESP_HK, "Server is now idle.");
+        xEventGroupSetBits(esp_hk_event_group, ESP_HK_SERVER_IDLE);
+    }
+    else if (state == kHAPAccessoryServerState_Running)
+    {
+        ESP_LOGD(ESP_HK, "Server is now running.");
+    }
+    else if (state == kHAPAccessoryServerState_Stopping)
+    {
+        ESP_LOGD(ESP_HK, "Server is now stopped.");
+    }
     else
     {
-        // AccessoryServerHandleUpdatedState(server, context); // todo
+        ESP_LOGD(ESP_HK, "No handler for state: %d", state);
     }
 }
 
@@ -276,7 +297,9 @@ static void InitializeBLE()
 
 void esp_hk_task()
 {
-    // Initialize accessory server.
+    esp_hk_event_group = xEventGroupCreate();
+
+    ESP_LOGD(ESP_HK, "Initialize accessory server.");
     HAPAccessoryServerCreate(
         &accessoryServer,
         &platform.hapAccessoryServerOptions,
@@ -284,19 +307,21 @@ void esp_hk_task()
         &platform.hapAccessoryServerCallbacks,
         /* context: */ NULL);
 
-    // Start accessory server for App.
+    ESP_LOGD(ESP_HK, "Start accessory server for App.");
     AppAccessoryServerStart();
 
-    // Run main loop until explicitly stopped.
+    ESP_LOGD(ESP_HK, "Running main loop, until it is explicitly stopped.");
     HAPPlatformRunLoopRun();
     // Run loop stopped explicitly by calling function HAPPlatformRunLoopStop.
 
-    // Cleanup.
-    // AppRelease(); //todo
+    ESP_LOGD(ESP_HK, "Run loop was explicitly stopped.");
 
+    vEventGroupDelete(esp_hk_event_group);
+
+    ESP_LOGD(ESP_HK, "Server state idle. Releasing server.");
     HAPAccessoryServerRelease(&accessoryServer);
 
-    DeinitializePlatform();
+    vTaskDelete(NULL);
 }
 
 esp_err_t esp_hk_init(HAPAccessory *accessory)
@@ -325,6 +350,57 @@ esp_err_t esp_hk_start()
     return ESP_OK;
 }
 
+static void esp_hk_stop_internal(void *ctx_void, size_t ctx_size)
+{
+    ESP_LOGD(ESP_HK, "Stopping server.");
+    HAPAccessoryServerStop(&accessoryServer);
+
+    // ESP_LOGD(ESP_HK, "Waiting for server to be idle.");
+    // xEventGroupWaitBits(esp_hk_event_group,
+    //                     ESP_HK_SERVER_IDLE,
+    //                     pdFALSE,
+    //                     pdFALSE,
+    //                     portMAX_DELAY);
+
+    // ESP_LOGD(ESP_HK, "Stopping run loop.");
+    // HAPPlatformRunLoopStop();
+}
+
+esp_err_t esp_hk_stop()
+{
+    HAPError err = HAPPlatformRunLoopScheduleCallback(esp_hk_stop_internal, NULL, 0);
+    if (err)
+    {
+        HAPAssert(err == kHAPError_Unknown);
+        HAPFatalError();
+    }
+
+    return ESP_OK;
+}
+
+static void esp_hk_resume_internal(void *ctx_void, size_t ctx_size)
+{
+    AppAccessoryServerStart();
+}
+
+esp_err_t esp_hk_resume()
+{
+    HAPError err = HAPPlatformRunLoopScheduleCallback(esp_hk_resume_internal, NULL, 0);
+    if (err)
+    {
+        HAPAssert(err == kHAPError_Unknown);
+        HAPFatalError();
+    }
+
+    return ESP_OK;
+}
+
+void esp_hk_free()
+{
+
+    DeinitializePlatform();
+}
+
 typedef struct
 {
     const HAPCharacteristic *characteristic;
@@ -335,7 +411,7 @@ typedef struct
 static void esp_hk_raise_event_internal(void *ctx_void, size_t ctx_size)
 {
     ESP_LOGD("HK", "HAPAccessoryServerRaiseEvent!");
-    esp_hk_raise_event_ctx_t *ctx = (esp_hk_raise_event_ctx_t*)ctx_void;
+    esp_hk_raise_event_ctx_t *ctx = (esp_hk_raise_event_ctx_t *)ctx_void;
     HAPAccessoryServerRaiseEvent(&accessoryServer, ctx->characteristic, ctx->service, ctx->accessory);
 }
 

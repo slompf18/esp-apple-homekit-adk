@@ -6,7 +6,10 @@
 
 esp_err_t esp_hk_init(HAPAccessory *accessory);
 esp_err_t esp_hk_start();
+esp_err_t esp_hk_stop();
+esp_err_t esp_hk_resume();
 esp_err_t esp_hk_raise_event(
     const HAPAccessory *accessory,
     const HAPService *service,
     const HAPCharacteristic *characteristic);
+void esp_hk_free();
