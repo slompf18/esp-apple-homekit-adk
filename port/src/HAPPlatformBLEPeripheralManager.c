@@ -20,6 +20,11 @@
 
 #include "HAPPlatformBLEPeripheralManager+Init.h"
 
+//#include <services/gap/ble_svc_gap.h>
+#include <esp_bt.h>
+
+#include "HAPLog+Attributes.h"
+
 static const HAPLogObject logObject = { .subsystem = kHAPPlatform_LogSubsystem, .category = "BLEPeripheralManager" };
 
 void HAPPlatformBLEPeripheralManagerCreate(
@@ -35,6 +40,12 @@ void HAPPlatformBLEPeripheralManagerCreate(
     HAPRawBufferZero(blePeripheralManager, sizeof *blePeripheralManager);
     blePeripheralManager->attributes = options->attributes;
     blePeripheralManager->numAttributes = options->numAttributes;
+}
+
+void HAPPlatformBLEPeripheralManagerRelease(HAPPlatformBLEPeripheralManagerRef blePeripheralManager) {
+    HAPPrecondition(blePeripheralManager);
+
+    // todo: Do we need that?
 }
 
 void HAPPlatformBLEPeripheralManagerSetDelegate(
@@ -341,6 +352,14 @@ void HAPPlatformBLEPeripheralManagerStartAdvertising(
 
     HAPRawBufferCopyBytes(blePeripheralManager->advertisingBytes, advertisingBytes, numAdvertisingBytes);
     blePeripheralManager->numAdvertisingBytes = (uint8_t) numAdvertisingBytes;
+
+
+    HAPLogBufferDebug(
+            &logObject,
+            (const void*) advertisingBytes,
+            numAdvertisingBytes,
+            "advertising data:%p:set", (const void*) advertisingBytes);
+
     if (scanResponseBytes) {
         HAPRawBufferCopyBytes(
                 blePeripheralManager->scanResponseBytes, HAPNonnullVoid(scanResponseBytes), numScanResponseBytes);

@@ -102,7 +102,7 @@ set (srcs "src/HAPPlatform.c"
 idf_component_register(SRCS "${srcs}"
                        INCLUDE_DIRS "${include_dirs}"
                        REQUIRES
-                       PRIV_REQUIRES nvs_flash mdns
+                       PRIV_REQUIRES mdns nvs_flash bt
                        )
 
 add_definitions(-DHAP_LOG_LEVEL=${CONFIG_HAP_LOG_LEVEL})

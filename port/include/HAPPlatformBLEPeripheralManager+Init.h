@@ -110,6 +110,8 @@ void HAPPlatformBLEPeripheralManagerCreate(
         HAPPlatformBLEPeripheralManagerRef blePeripheralManager,
         const HAPPlatformBLEPeripheralManagerOptions* options);
 
+void HAPPlatformBLEPeripheralManagerRelease(HAPPlatformBLEPeripheralManagerRef blePeripheralManager);
+
 #if __has_feature(nullability)
 #pragma clang assume_nonnull end
 #endif

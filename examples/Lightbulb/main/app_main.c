@@ -14,7 +14,9 @@
 #include "App.h"
 #include "DB.h"
 
-#define IP 1
+#define IP 0
+#define BLE 1
+
 #include "HAP.h"
 #include "HAPPlatform+Init.h"
 #include "HAPPlatformAccessorySetup+Init.h"
@@ -27,6 +29,9 @@
 #include "HAPPlatformServiceDiscovery+Init.h"
 #include "HAPPlatformTCPStreamManager+Init.h"
 #endif
+#if BLE
+#include "HAPPlatformBLEPeripheralManager.h"
+#endif
 
 #include <signal.h>
 static bool requestedFactoryReset = false;
@@ -35,6 +40,7 @@ static bool clearPairings = false;
 #define PREFERRED_ADVERTISING_INTERVAL (HAPBLEAdvertisingIntervalCreateFromMilliseconds(417.5f))
 void app_wifi_init(void);
 esp_err_t app_wifi_connect(void);
+
 /**
  * Global platform objects.
  * Only tracks objects that will be released in DeinitializePlatform.
@@ -52,6 +58,10 @@ static struct {
 
 #if IP
     HAPPlatformTCPStreamManager tcpStreamManager;
+#endif
+
+#if BLE
+    HAPPlatformBLEPeripheralManager blePeripheralManager;
 #endif
 
     HAPPlatformMFiHWAuth mfiHWAuth;
@@ -122,13 +132,15 @@ static void InitializePlatform() {
     platform.hapPlatform.ip.serviceDiscovery = &serviceDiscovery;
 #endif
 
-#if (BLE)
-    // BLE peripheral manager. Depends on key-value store.
-    static HAPPlatformBLEPeripheralManagerOptions blePMOptions = { 0 };
-    blePMOptions.keyValueStore = &platform.keyValueStore;
+#if BLE
+
+    static HAPPlatformBLEPeripheralManagerAttribute attributes[100];
 
     static HAPPlatformBLEPeripheralManager blePeripheralManager;
-    HAPPlatformBLEPeripheralManagerCreate(&blePeripheralManager, &blePMOptions);
+    HAPPlatformBLEPeripheralManagerCreate(
+        &blePeripheralManager, 
+        &(const HAPPlatformBLEPeripheralManagerOptions) { .attributes = attributes,
+                                                              .numAttributes = HAPArrayCount(attributes) });
     platform.hapPlatform.ble.blePeripheralManager = &blePeripheralManager;
 #endif
 
@@ -169,6 +181,11 @@ static void DeinitializePlatform() {
 #if IP
     // TCP stream manager.
     HAPPlatformTCPStreamManagerRelease(&platform.tcpStreamManager);
+#endif
+
+#if BLE
+    // TCP stream manager.
+    HAPPlatformBLEPeripheralManagerRelease(&platform.blePeripheralManager);
 #endif
 
     AppDeinitialize();
